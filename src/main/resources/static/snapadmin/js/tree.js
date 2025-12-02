@@ -1,0 +1,264 @@
+document.addEventListener('DOMContentLoaded', function () {
+    const container = document.getElementById('tree-container');
+    if (!container) return;
+
+    const rootClass = container.dataset.rootClass;
+    const baseUrl = container.dataset.baseUrl;
+
+    loadRoots(rootClass, container, baseUrl);
+
+    // Search Logic
+    const searchInput = document.getElementById('tree-search');
+    const searchResults = document.getElementById('search-results');
+    let searchTimeout;
+
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(searchTimeout);
+            const query = e.target.value;
+
+            if (query.length < 2) {
+                searchResults.classList.add('d-none');
+                return;
+            }
+
+            searchTimeout = setTimeout(() => performSearch(query, rootClass, baseUrl, searchResults), 300);
+        });
+
+        // Hide results when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+                searchResults.classList.add('d-none');
+            }
+        });
+    }
+});
+
+async function loadRoots(entityClass, container, baseUrl) {
+    try {
+        const response = await fetch(`/${baseUrl}/api/tree/roots/${entityClass}`);
+        const roots = await response.json();
+
+        container.innerHTML = ''; // Clear loading spinner
+
+        if (roots.length === 0) {
+            container.innerHTML = '<div class="text-muted text-center">No items found.</div>';
+            return;
+        }
+
+        renderNodes(roots, container, baseUrl);
+    } catch (error) {
+        console.error('Error loading roots:', error);
+        container.innerHTML = '<div class="text-danger">Error loading hierarchy.</div>';
+    }
+}
+
+function renderNodes(nodes, container, baseUrl) {
+    const ul = document.createElement('ul');
+    ul.className = 'tree-list';
+
+    nodes.forEach(node => {
+        const li = createNodeElement(node, baseUrl);
+        ul.appendChild(li);
+    });
+
+    container.appendChild(ul);
+}
+
+function createNodeElement(node, baseUrl) {
+    const li = document.createElement('li');
+    li.className = 'tree-node-wrapper';
+    li.dataset.id = node.id;
+    li.dataset.type = node.type;
+    li.dataset.childField = node.childField || '';
+    li.dataset.hasChildren = node.hasChildren;
+
+    const content = document.createElement('div');
+    content.className = 'tree-node-content';
+
+    // Expand/collapse button
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'tree-toggle btn btn-sm btn-link text-decoration-none p-0';
+
+    if (node.hasChildren) {
+        toggleBtn.innerHTML = '<i class="bi bi-chevron-right text-muted"></i>';
+        toggleBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleNode(node, li, toggleBtn, baseUrl);
+        };
+    } else {
+        toggleBtn.innerHTML = '<i class="bi bi-dot text-muted" style="opacity: 0.5"></i>';
+        toggleBtn.disabled = true;
+        toggleBtn.style.cursor = 'default';
+    }
+    content.appendChild(toggleBtn);
+
+    // Icon
+    const icon = document.createElement('i');
+    icon.className = (node.icon || 'bi bi-file') + ' me-2 ms-1 text-secondary';
+    content.appendChild(icon);
+
+    // Label
+    const label = document.createElement('span');
+    label.className = 'tree-label';
+    label.textContent = node.label;
+    label.onclick = () => openEntity(node, baseUrl);
+    content.appendChild(label);
+
+    // ID badge (optional)
+    const idBadge = document.createElement('small');
+    idBadge.className = 'text-muted ms-2 opacity-50';
+    idBadge.textContent = `#${node.id}`;
+    content.appendChild(idBadge);
+
+    li.appendChild(content);
+
+    return li;
+}
+
+async function toggleNode(node, li, toggleBtn, baseUrl) {
+    let childContainer = li.querySelector('.tree-children');
+    const icon = toggleBtn.querySelector('i');
+
+    if (childContainer) {
+        // Already loaded, just toggle visibility
+        if (childContainer.style.display === 'none') {
+            childContainer.style.display = 'block';
+            icon.classList.replace('bi-chevron-right', 'bi-chevron-down');
+        } else {
+            childContainer.style.display = 'none';
+            icon.classList.replace('bi-chevron-down', 'bi-chevron-right');
+        }
+    } else {
+        // Load children
+        icon.className = 'spinner-border spinner-border-sm text-primary';
+        icon.innerHTML = ''; // Remove chevron
+
+        try {
+            const children = await fetchChildren(node, baseUrl);
+
+            // Restore icon
+            icon.className = 'bi bi-chevron-down text-muted';
+
+            childContainer = document.createElement('div');
+            childContainer.className = 'tree-children ms-4';
+
+            if (children.length === 0) {
+                childContainer.innerHTML = '<div class="text-muted small fst-italic py-1">No children</div>';
+            } else {
+                renderNodes(children, childContainer, baseUrl);
+            }
+
+            li.appendChild(childContainer);
+        } catch (error) {
+            console.error('Error loading children:', error);
+            icon.className = 'bi bi-exclamation-circle text-danger';
+        }
+    }
+}
+
+async function fetchChildren(node, baseUrl) {
+    if (!node.childField) return [];
+    const response = await fetch(`/${baseUrl}/api/tree/children/${node.type}/${node.id}/${node.childField}`);
+    return await response.json();
+}
+
+function openEntity(node, baseUrl) {
+    window.location.href = `/${baseUrl}/model/${node.type}/edit/${node.id}`;
+}
+
+async function performSearch(query, rootClass, baseUrl, resultsContainer) {
+    try {
+        const response = await fetch(`/${baseUrl}/api/tree/search?q=${encodeURIComponent(query)}&rootClass=${rootClass}`);
+        const results = await response.json();
+        displaySearchResults(results, resultsContainer, baseUrl);
+    } catch (error) {
+        console.error("Search error:", error);
+    }
+}
+
+function displaySearchResults(results, container, baseUrl) {
+    container.innerHTML = '';
+
+    if (results.length === 0) {
+        container.innerHTML = '<div class="list-group-item text-muted">No results found</div>';
+    } else {
+        results.forEach(result => {
+            const item = document.createElement('a');
+            item.href = '#';
+            item.className = 'list-group-item list-group-item-action';
+            item.innerHTML = `
+                <div class="d-flex w-100 justify-content-between align-items-center">
+                    <h6 class="mb-0 text-truncate" style="max-width: 70%;">${result.label}</h6>
+                    <small class="text-muted">${result.type.split('.').pop()}</small>
+                </div>
+            `;
+            item.onclick = (e) => {
+                e.preventDefault();
+                highlightPath(result.path, baseUrl);
+                container.classList.add('d-none');
+            };
+            container.appendChild(item);
+        });
+    }
+
+    container.classList.remove('d-none');
+}
+
+async function highlightPath(path, baseUrl) {
+    // path is [rootId, childId, ..., targetId]
+
+    // 1. Find root node
+    const rootId = path[0];
+    let currentNode = document.querySelector(`li.tree-node-wrapper[data-id="${rootId}"]`);
+
+    if (!currentNode) {
+        console.error("Root node not found", rootId);
+        return;
+    }
+
+    // 2. Iterate through path
+    for (let i = 0; i < path.length - 1; i++) {
+        const currentId = path[i];
+        const nextId = path[i + 1];
+
+        // Ensure current node is expanded
+        const li = currentNode;
+        const toggleBtn = li.querySelector('.tree-toggle');
+
+        if (toggleBtn && !toggleBtn.disabled) {
+            // Check if already expanded
+            const childContainer = li.querySelector('.tree-children');
+            if (!childContainer) {
+                // Not loaded, click to load
+                const node = {
+                    id: li.dataset.id,
+                    type: li.dataset.type,
+                    childField: li.dataset.childField,
+                    hasChildren: li.dataset.hasChildren === 'true'
+                };
+                await toggleNode(node, li, toggleBtn, baseUrl);
+            } else if (childContainer.style.display === 'none') {
+                // Hidden, show it
+                childContainer.style.display = 'block';
+                li.querySelector('.tree-toggle i').classList.replace('bi-chevron-right', 'bi-chevron-down');
+            }
+        }
+
+        // Find next node
+        const nextNode = li.querySelector(`li.tree-node-wrapper[data-id="${nextId}"]`);
+        if (!nextNode) {
+            console.error("Next node not found in path", nextId);
+            return;
+        }
+        currentNode = nextNode;
+    }
+
+    // 3. Highlight target
+    document.querySelectorAll('.tree-node-content.highlight').forEach(el => el.classList.remove('highlight'));
+    const content = currentNode.querySelector('.tree-node-content');
+    if (content) {
+        content.classList.add('highlight');
+        content.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+}
