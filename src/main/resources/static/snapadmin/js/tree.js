@@ -32,6 +32,80 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     }
+
+    // Context Menu Logic
+    const contextMenu = document.getElementById('tree-context-menu');
+    let contextMenuNode = null;
+
+    // Hide context menu when clicking outside or pressing Escape
+    document.addEventListener('click', () => hideContextMenu());
+    document.addEventListener('contextmenu', (e) => {
+        // Only prevent default if not on tree node (to allow default context menu elsewhere)
+        if (!e.target.closest('.tree-node-content')) {
+            hideContextMenu();
+        }
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') hideContextMenu();
+    });
+
+    // Context menu item handlers
+    if (contextMenu) {
+        contextMenu.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const menuItem = e.target.closest('.context-menu-item');
+            if (!menuItem || !contextMenuNode) return;
+
+            const action = menuItem.dataset.action;
+            if (action === 'edit') {
+                handleEdit(contextMenuNode, baseUrl);
+            } else if (action === 'delete') {
+                handleDelete(contextMenuNode, baseUrl);
+            } else if (action === 'add-child') {
+                handleAddChild(contextMenuNode, baseUrl);
+            }
+            hideContextMenu();
+        });
+    }
+
+    // Expose context menu functions globally for use in createNodeElement
+    window.showTreeContextMenu = function (event, node, nodeElement) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        contextMenuNode = { node, nodeElement };
+
+        // Show/Hide "Add Child" option
+        const addChildItem = contextMenu.querySelector('[data-action="add-child"]');
+        const divider = contextMenu.querySelector('.dropdown-divider');
+
+        if (addChildItem) {
+            if (node.childType) {
+                addChildItem.style.display = 'flex';
+                if (divider) divider.style.display = 'block';
+
+                // Update label
+                const labelSpan = addChildItem.querySelector('#add-child-label');
+                if (labelSpan) {
+                    labelSpan.textContent = `Add ${node.childLabel || 'Child'}`;
+                }
+            } else {
+                addChildItem.style.display = 'none';
+                if (divider) divider.style.display = 'none';
+            }
+        }
+
+        contextMenu.style.display = 'block';
+        contextMenu.style.left = event.pageX + 'px';
+        contextMenu.style.top = event.pageY + 'px';
+    };
+
+    function hideContextMenu() {
+        if (contextMenu) {
+            contextMenu.style.display = 'none';
+            contextMenuNode = null;
+        }
+    }
 });
 
 async function loadRoots(entityClass, container, baseUrl) {
@@ -71,6 +145,9 @@ function createNodeElement(node, baseUrl) {
     li.dataset.id = node.id;
     li.dataset.type = node.type;
     li.dataset.childField = node.childField || '';
+    li.dataset.childType = node.childType || '';
+    li.dataset.childLabel = node.childLabel || '';
+    li.dataset.inverseFieldName = node.inverseFieldName || '';
     li.dataset.hasChildren = node.hasChildren;
 
     const content = document.createElement('div');
@@ -112,6 +189,13 @@ function createNodeElement(node, baseUrl) {
     content.appendChild(idBadge);
 
     li.appendChild(content);
+
+    // Add right-click context menu
+    content.addEventListener('contextmenu', (e) => {
+        if (window.showTreeContextMenu) {
+            window.showTreeContextMenu(e, node, li);
+        }
+    });
 
     return li;
 }
@@ -261,4 +345,72 @@ async function highlightPath(path, baseUrl) {
         content.classList.add('highlight');
         content.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
+}
+
+// Context Menu Action Handlers
+function handleEdit(contextMenuNode, baseUrl) {
+    const { node } = contextMenuNode;
+    // Redirect to edit page
+    window.location.href = `/${baseUrl}/model/${node.type}/edit/${node.id}`;
+}
+
+async function handleDelete(contextMenuNode, baseUrl) {
+    const { node, nodeElement } = contextMenuNode;
+
+    // Confirm deletion
+    const confirmed = confirm(`Are you sure you want to delete "${node.label}"?\n\nThis action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+        // Call delete API
+        const response = await fetch(`/${baseUrl}/model/${node.type}/delete/${node.id}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            }
+        });
+
+        if (response.ok || response.redirected) {
+            // Remove node from tree
+            if (nodeElement && nodeElement.parentElement) {
+                nodeElement.remove();
+
+                // Show success message (optional)
+                console.log(`Successfully deleted ${node.label}`);
+            }
+        } else {
+            throw new Error('Delete failed');
+        }
+    } catch (error) {
+        console.error('Error deleting node:', error);
+        alert(`Failed to delete "${node.label}". Please try again.`);
+    }
+}
+
+function handleAddChild(contextMenuNode, baseUrl) {
+    const { node, nodeElement } = contextMenuNode;
+
+    if (!node.childType) {
+        console.error("No child type defined for this node");
+        return;
+    }
+
+    // Construct URL for Create page
+    // For many-to-many relationships, use the inverse field name if available
+    // For many-to-one relationships, use the parent type + "_id" pattern
+
+    let fieldName;
+    const inverseFieldName = nodeElement.dataset.inverseFieldName;
+
+    if (inverseFieldName && inverseFieldName !== '') {
+        // Many-to-many relationship: use the inverse field name
+        // The field expects an array of IDs, so we use fieldName[]
+        fieldName = inverseFieldName + '[]';
+    } else {
+        // Many-to-one relationship: use the traditional pattern
+        const parentTypeName = node.type.split('.').pop().toLowerCase();
+        fieldName = parentTypeName + '_id';
+    }
+
+    window.location.href = `/${baseUrl}/model/${node.childType}/create?${encodeURIComponent(fieldName)}=${encodeURIComponent(node.id)}`;
 }

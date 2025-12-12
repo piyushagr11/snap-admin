@@ -12,6 +12,7 @@ import tech.ailef.snapadmin.external.dto.TreeConfiguration;
 import tech.ailef.snapadmin.external.dto.TreeNodeDTO;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.ParameterizedType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -116,9 +117,68 @@ public class TreeService {
         dto.setHasChildren(!childFields.isEmpty());
         if (!childFields.isEmpty()) {
             // Default to the first child field
-            dto.setChildField(childFields.get(0).getName());
+            Field childField = childFields.get(0);
+            dto.setChildField(childField.getName());
+
+            // Determine child type and label
+            try {
+                // Get the generic type of the collection (e.g., List<Model> -> Model)
+                ParameterizedType stringListType = (ParameterizedType) childField
+                        .getGenericType();
+                Class<?> childClass = (Class<?>) stringListType.getActualTypeArguments()[0];
+                dto.setChildType(childClass.getName());
+
+                // Get label from annotation
+                if (childField.isAnnotationPresent(SnapTree.class)) {
+                    SnapTree ann = childField.getAnnotation(SnapTree.class);
+                    String label = ann.childLabel();
+                    if (label.isEmpty()) {
+                        label = childClass.getSimpleName();
+                    }
+                    dto.setChildLabel(label);
+                } else {
+                    dto.setChildLabel(childClass.getSimpleName());
+                }
+
+                // For many-to-many relationships, find the inverse field name
+                if (childField.isAnnotationPresent(ManyToMany.class)) {
+                    String inverseField = findInverseField(childClass, obj.getSchema().getJavaClass());
+                    dto.setInverseFieldName(inverseField);
+                }
+            } catch (Exception e) {
+                // Fallback or error handling
+                e.printStackTrace();
+            }
         }
 
         return dto;
+    }
+
+    /**
+     * Finds the field name in the child class that references the parent class
+     * in a many-to-many relationship.
+     * 
+     * @param childClass  The child entity class
+     * @param parentClass The parent entity class
+     * @return The field name in the child class, or null if not found
+     */
+    private String findInverseField(Class<?> childClass, Class<?> parentClass) {
+        for (Field field : childClass.getDeclaredFields()) {
+            if (field.isAnnotationPresent(ManyToMany.class)) {
+                try {
+                    // Check if this field's generic type matches the parent class
+                    if (field.getGenericType() instanceof ParameterizedType) {
+                        ParameterizedType paramType = (ParameterizedType) field.getGenericType();
+                        Class<?> fieldType = (Class<?>) paramType.getActualTypeArguments()[0];
+                        if (fieldType.equals(parentClass)) {
+                            return tech.ailef.snapadmin.external.misc.Utils.camelToSnake(field.getName());
+                        }
+                    }
+                } catch (Exception e) {
+                    // Ignore and continue
+                }
+            }
+        }
+        return null;
     }
 }

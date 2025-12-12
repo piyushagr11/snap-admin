@@ -283,7 +283,8 @@ public class SnapAdminController {
 	}
 
 	@GetMapping("/model/{className}/create")
-	public String create(Model model, @PathVariable String className, RedirectAttributes attr) {
+	public String create(Model model, @PathVariable String className,
+			@RequestParam MultiValueMap<String, String> requestParams, RedirectAttributes attr) {
 		DbObjectSchema schema = snapAdmin.findSchemaByClassName(className);
 
 		if (!schema.isCreateEnabled()) {
@@ -293,11 +294,54 @@ public class SnapAdminController {
 			return "redirect:/" + properties.getBaseUrl() + "/model/" + className;
 		}
 
+		// Convert MultiValueMap to Map<String, String> for the view
+		Map<String, String> params = new HashMap<>();
+		requestParams.forEach((k, v) -> {
+			if (!v.isEmpty()) {
+				params.put(k, v.get(0));
+			}
+		});
+
+		// Prepare pre-populated values for many-to-many fields from URL parameters
+		Map<String, List<DbObject>> prePopulatedManyToMany = new HashMap<>();
+		for (tech.ailef.snapadmin.external.dbmapping.fields.DbField field : schema.getManyToManyOwnedFields()) {
+			String fieldArrayKey = field.getName() + "[]";
+			logger.info("Checking for many-to-many pre-population. Field: {}, Key: {}", field.getJavaName(),
+					fieldArrayKey);
+
+			if (requestParams.containsKey(fieldArrayKey)) {
+				List<String> ids = requestParams.get(fieldArrayKey);
+				logger.info("Found IDs for key {}: {}", fieldArrayKey, ids);
+
+				if (ids != null && !ids.isEmpty()) {
+					try {
+						List<DbObject> entities = new ArrayList<>();
+						for (String idStr : ids) {
+							Object id = field.getConnectedSchema().getPrimaryKey().getType().parseValue(idStr);
+							Optional<DbObject> entity = repository.findById(field.getConnectedSchema(), id);
+							entity.ifPresent(entities::add);
+						}
+						if (!entities.isEmpty()) {
+							prePopulatedManyToMany.put(field.getJavaName(), entities);
+							logger.info("Pre-populated {} entities for field {}", entities.size(), field.getJavaName());
+						}
+					} catch (Exception e) {
+						logger.error("Error pre-populating many-to-many field " + field.getJavaName(), e);
+					}
+				}
+			} else {
+				logger.info("Key {} not found in request params: {}", fieldArrayKey, requestParams.keySet());
+			}
+		}
+
 		model.addAttribute("className", className);
 		model.addAttribute("schema", schema);
 		model.addAttribute("title", "Entities | " + schema.getJavaClass().getSimpleName() + " | Create");
 		model.addAttribute("activePage", "entities");
 		model.addAttribute("create", true);
+		model.addAttribute("params", params);
+		model.addAttribute("requestParams", requestParams); // Add full MultiValueMap for array parameters
+		model.addAttribute("prePopulatedManyToMany", prePopulatedManyToMany); // Add pre-populated many-to-many values
 
 		return "snapadmin/model/create";
 	}
