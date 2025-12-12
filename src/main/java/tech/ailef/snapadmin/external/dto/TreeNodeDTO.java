@@ -12,6 +12,9 @@ public class TreeNodeDTO {
     private boolean hasChildren; // Whether this node can be expanded
     private boolean isRoot; // Is this a root node?
     private String childField; // Field name to fetch children (if hasChildren)
+    private String childType; // Type of the child entity (for Add Child action)
+    private String childLabel; // Label for the child entity (e.g. "Model")
+    private String inverseFieldName; // For many-to-many: field name in child entity pointing back to parent
 
     public TreeNodeDTO() {
     }
@@ -77,6 +80,30 @@ public class TreeNodeDTO {
 
     public void setChildField(String childField) {
         this.childField = childField;
+    }
+
+    public String getChildType() {
+        return childType;
+    }
+
+    public void setChildType(String childType) {
+        this.childType = childType;
+    }
+
+    public String getChildLabel() {
+        return childLabel;
+    }
+
+    public void setChildLabel(String childLabel) {
+        this.childLabel = childLabel;
+    }
+
+    public String getInverseFieldName() {
+        return inverseFieldName;
+    }
+
+    public void setInverseFieldName(String inverseFieldName) {
+        this.inverseFieldName = inverseFieldName;
     }
 
     @Override

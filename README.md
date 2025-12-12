@@ -105,6 +105,16 @@ public class AutoPart {
 }
 ```
 
+### Link Existing Items
+
+For Many-to-Many relationships, you can link existing entities to a parent node directly from the tree view.
+*   Right-click on a node that has a Many-to-Many relationship (e.g., a `VehicleModel` with `AutoParts`).
+*   Select "Link Existing...".
+*   Search for the item you want to link.
+*   Select the item and click "Link".
+
+This feature is automatically enabled for fields annotated with `@ManyToMany` where the child entity has a corresponding inverse field.
+
 ## Installation
 
 1. SnapAdmin is distributed on Maven. For the latest stable release you can simply include the following snippet in your `pom.xml` file:

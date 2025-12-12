@@ -63,6 +63,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 handleDelete(contextMenuNode, baseUrl);
             } else if (action === 'add-child') {
                 handleAddChild(contextMenuNode, baseUrl);
+            } else if (action === 'link-existing') {
+                handleLinkExisting(contextMenuNode);
             }
             hideContextMenu();
         });
@@ -77,6 +79,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Show/Hide "Add Child" option
         const addChildItem = contextMenu.querySelector('[data-action="add-child"]');
+        const linkExistingItem = contextMenu.querySelector('[data-action="link-existing"]');
         const divider = contextMenu.querySelector('.dropdown-divider');
 
         if (addChildItem) {
@@ -92,6 +95,16 @@ document.addEventListener('DOMContentLoaded', function () {
             } else {
                 addChildItem.style.display = 'none';
                 if (divider) divider.style.display = 'none';
+            }
+        }
+
+        // Show/Hide "Link Existing" option
+        if (linkExistingItem) {
+            // Only show for Many-to-Many relationships (indicated by presence of inverseFieldName)
+            if (node.inverseFieldName) {
+                linkExistingItem.style.display = 'flex';
+            } else {
+                linkExistingItem.style.display = 'none';
             }
         }
 
@@ -413,4 +426,196 @@ function handleAddChild(contextMenuNode, baseUrl) {
     }
 
     window.location.href = `/${baseUrl}/model/${node.childType}/create?${encodeURIComponent(fieldName)}=${encodeURIComponent(node.id)}`;
+}
+
+// Link Existing Logic
+let linkModal = null;
+let linkSearchTimeout;
+let selectedLinkItem = null;
+let currentLinkContext = null;
+
+document.addEventListener('DOMContentLoaded', function () {
+    const modalEl = document.getElementById('linkExistingModal');
+    if (modalEl) {
+        linkModal = new bootstrap.Modal(modalEl);
+
+        const searchInput = document.getElementById('link-search');
+        const resultsContainer = document.getElementById('link-search-results');
+        const confirmBtn = document.getElementById('btn-confirm-link');
+
+        // Search Input Handler
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(linkSearchTimeout);
+            const query = e.target.value;
+
+            if (query.length < 2) {
+                resultsContainer.classList.add('d-none');
+                return;
+            }
+
+            linkSearchTimeout = setTimeout(() => performLinkSearch(query, currentLinkContext.node.childType, resultsContainer), 300);
+        });
+
+        // Confirm Button Handler
+        confirmBtn.addEventListener('click', () => {
+            if (selectedLinkItem && currentLinkContext) {
+                performLink(currentLinkContext, selectedLinkItem);
+            }
+        });
+
+        // Clear state on modal close
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            searchInput.value = '';
+            resultsContainer.classList.add('d-none');
+            confirmBtn.disabled = true;
+            selectedLinkItem = null;
+            currentLinkContext = null;
+        });
+    }
+});
+
+async function performLinkSearch(query, className, container) {
+    try {
+        // Use the existing autocomplete API
+        const response = await fetch(`/${document.getElementById('tree-container').dataset.baseUrl}/api/autocomplete/${className}?query=${encodeURIComponent(query)}`);
+        const results = await response.json();
+
+        container.innerHTML = '';
+
+        if (results.length === 0) {
+            container.innerHTML = '<div class="list-group-item text-muted">No results found</div>';
+        } else {
+            results.forEach(result => {
+                const item = document.createElement('a');
+                item.href = '#';
+                item.className = 'list-group-item list-group-item-action';
+                item.innerHTML = `
+                    <div class="d-flex w-100 justify-content-between align-items-center">
+                        <h6 class="mb-0">${result.value}</h6>
+                        <small class="text-muted">#${result.id}</small>
+                    </div>
+                `;
+                item.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    selectLinkItem(result, item, container);
+                };
+                container.appendChild(item);
+            });
+        }
+        container.classList.remove('d-none');
+    } catch (error) {
+        console.error("Link search error:", error);
+    }
+}
+
+function selectLinkItem(item, element, container) {
+    console.log("Selecting link item:", item);
+    selectedLinkItem = item;
+
+    // Update UI to show selection
+    container.querySelectorAll('.active').forEach(el => el.classList.remove('active'));
+    element.classList.add('active');
+
+    // Set input value and hide dropdown
+    const searchInput = document.getElementById('link-search');
+    if (searchInput) {
+        searchInput.value = item.value;
+    }
+    container.classList.add('d-none');
+
+    // Enable confirm button
+    const confirmBtn = document.getElementById('btn-confirm-link');
+    if (confirmBtn) {
+        console.log("Enabling confirm button");
+        confirmBtn.disabled = false;
+    } else {
+        console.error("Confirm button not found");
+    }
+}
+
+async function performLink(context, item) {
+    const { node, nodeElement } = context;
+    const baseUrl = document.getElementById('tree-container').dataset.baseUrl;
+
+    // Determine field name (similar to handleAddChild)
+    let fieldName;
+    const inverseFieldName = nodeElement.dataset.inverseFieldName;
+
+    if (inverseFieldName && inverseFieldName !== '') {
+        // For linking, we need the field name on the PARENT side that holds the collection
+        // But wait, the API expects the field name on the PARENT side.
+        // Let's re-read the API requirement.
+        // API: linkNodes(parentClass, parentId, childClass, childId, fieldName)
+        // fieldName is "The name of the collection field in the parent entity"
+
+        // The `inverseFieldName` stored in dataset is the field on the CHILD that points to the PARENT.
+        // We need the field on the PARENT that points to the CHILD.
+        // This is actually `node.childField`!
+        fieldName = node.childField;
+    } else {
+        // Fallback or error?
+        // If it's OneToMany, the parent has a collection too.
+        fieldName = node.childField;
+    }
+
+    try {
+        const response = await fetch(`/${baseUrl}/api/tree/link`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                parentClass: node.type,
+                parentId: node.id,
+                childClass: node.childType,
+                childId: item.id,
+                field: fieldName
+            })
+        });
+
+        if (response.ok) {
+            // Success!
+            linkModal.hide();
+
+            // Refresh the parent node to show the new child
+            // We can do this by simulating a click on the toggle button to collapse and expand
+            const toggleBtn = nodeElement.querySelector('.tree-toggle');
+            if (toggleBtn) {
+                // If currently expanded, collapse first
+                const childContainer = nodeElement.querySelector('.tree-children');
+                if (childContainer && childContainer.style.display !== 'none') {
+                    childContainer.remove(); // Remove to force re-fetch
+                    // Reset icon
+                    toggleBtn.querySelector('i').className = 'bi bi-chevron-right text-muted';
+                }
+
+                // Now expand (which will fetch fresh data)
+                toggleNode(node, nodeElement, toggleBtn, baseUrl);
+            }
+        } else {
+            const errorText = await response.text();
+            alert('Failed to link item: ' + errorText);
+        }
+    } catch (error) {
+        console.error('Link error:', error);
+        alert('An error occurred while linking.');
+    }
+}
+
+function handleLinkExisting(contextMenuNode) {
+    console.log("Opening Link Existing modal for:", contextMenuNode);
+    currentLinkContext = contextMenuNode;
+    if (linkModal) {
+        const btn = document.getElementById('btn-confirm-link');
+        if (btn) {
+            console.log("Disabling confirm button on open");
+            btn.disabled = true;
+        }
+        linkModal.show();
+        // Focus search input after modal opens
+        setTimeout(() => document.getElementById('link-search').focus(), 500);
+    } else {
+        console.error("Link modal not initialized");
+    }
 }

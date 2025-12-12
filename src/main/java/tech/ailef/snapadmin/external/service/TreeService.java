@@ -155,6 +155,55 @@ public class TreeService {
     }
 
     /**
+     * Links two existing nodes (entities) by adding the child to the parent's
+     * collection.
+     * 
+     * @param parentClass The class name of the parent entity
+     * @param parentId    The ID of the parent entity
+     * @param childClass  The class name of the child entity
+     * @param childId     The ID of the child entity
+     * @param fieldName   The name of the collection field in the parent entity
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public void linkNodes(String parentClass, String parentId, String childClass, String childId, String fieldName) {
+        DbObjectSchema parentSchema = snapAdmin.findSchemaByClassName(parentClass);
+        DbObjectSchema childSchema = snapAdmin.findSchemaByClassName(childClass);
+
+        if (parentSchema == null || childSchema == null) {
+            throw new RuntimeException("Invalid parent or child class");
+        }
+
+        Object parentIdObj = parentSchema.getPrimaryKey().getType().parseValue(parentId);
+        Object childIdObj = childSchema.getPrimaryKey().getType().parseValue(childId);
+
+        Optional<?> parentOpt = parentSchema.getJpaRepository().findById(parentIdObj);
+        Optional<?> childOpt = childSchema.getJpaRepository().findById(childIdObj);
+
+        if (parentOpt.isPresent() && childOpt.isPresent()) {
+            Object parent = parentOpt.get();
+            Object child = childOpt.get();
+
+            try {
+                Field field = parent.getClass().getDeclaredField(fieldName);
+                field.setAccessible(true);
+                java.util.Collection<Object> collection = (java.util.Collection<Object>) field.get(parent);
+
+                if (collection == null) {
+                    collection = new ArrayList<>();
+                    field.set(parent, collection);
+                }
+
+                collection.add(child);
+                parentSchema.getJpaRepository().save(parent);
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to link nodes: " + e.getMessage(), e);
+            }
+        } else {
+            throw new RuntimeException("Parent or Child entity not found");
+        }
+    }
+
+    /**
      * Finds the field name in the child class that references the parent class
      * in a many-to-many relationship.
      * 

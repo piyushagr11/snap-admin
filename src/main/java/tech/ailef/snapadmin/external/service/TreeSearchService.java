@@ -41,15 +41,18 @@ public class TreeSearchService {
                 for (List<TreeNodeDTO> path : paths) {
                     // Path is [Root, Child, ..., Match]
 
-                    // Build context string: "Root > Child"
-                    String context = path.stream()
-                            .limit(path.size() - 1) // Exclude the match itself
-                            .map(TreeNodeDTO::getLabel)
-                            .collect(Collectors.joining(" > "));
-
-                    String label = match.getDisplayName();
-                    if (!context.isEmpty()) {
-                        label += " (" + context + ")";
+                    // Build full hierarchy path: "Root > Child > Match"
+                    String label;
+                    if (path.size() > 1) {
+                        // Include parent context with > separator
+                        String context = path.stream()
+                                .limit(path.size() - 1) // Exclude the match itself
+                                .map(TreeNodeDTO::getLabel)
+                                .collect(Collectors.joining(" > "));
+                        label = context + " > " + match.getDisplayName();
+                    } else {
+                        // No parent context, just the match
+                        label = match.getDisplayName();
                     }
 
                     // DTO needs list of IDs for highlighting

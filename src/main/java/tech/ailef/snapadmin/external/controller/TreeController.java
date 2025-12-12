@@ -89,4 +89,20 @@ public class TreeController {
             @RequestParam String rootClass) {
         return treeSearchService.search(q, rootClass);
     }
+
+    @org.springframework.web.bind.annotation.PostMapping("/api/tree/link")
+    @ResponseBody
+    public org.springframework.http.ResponseEntity<?> linkNodes(
+            @RequestParam String parentClass,
+            @RequestParam String parentId,
+            @RequestParam String childClass,
+            @RequestParam String childId,
+            @RequestParam String field) {
+        try {
+            treeService.linkNodes(parentClass, parentId, childClass, childId, field);
+            return org.springframework.http.ResponseEntity.ok().build();
+        } catch (Exception e) {
+            return org.springframework.http.ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
 }
